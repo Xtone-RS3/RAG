@@ -16,7 +16,7 @@ import re
 INDEX_DIR = "data/processed/bm25_index"
 CHUNKS_DIR = "data/processed/chunks"
 os.environ["HF_HOME"] = "/sgoinfre/gasoares/.cache/huggingface"
-os.environ["HF_TOKEN"] = "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"
+os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN")
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
 

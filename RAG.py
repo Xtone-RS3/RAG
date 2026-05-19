@@ -12,11 +12,10 @@ import uuid
 
 # source venv/bin/activate
 # export HF_HOME=/sgoinfre/gasoares/.cache/huggingface
-# export HF_TOKEN=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
-# pip install transformers langchain_community langchain_text_splitters langchain_huggingface langchain_chroma pydantic
-# export OPENAI_API_KEY=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
 
-os.environ["HUGGINGFACEHUB_API_TOKEN"] = "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"
+# pip install transformers langchain_community langchain_text_splitters langchain_huggingface langchain_chroma pydantic
+
+
 model_name = "Qwen/Qwen3-0.6B"
 
 # load the tokenizer and the model
