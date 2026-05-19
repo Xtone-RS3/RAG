@@ -243,6 +243,7 @@ def save_chunks_json(chunks):
 
 
 def save_index(retriever: bm25s.BM25):
+    print("lol")
     os.makedirs(INDEX_DIR, exist_ok=True)
     retriever.save(INDEX_DIR)
 
