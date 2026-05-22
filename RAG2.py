@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 import bm25s
-import pickle
+import pickle  # needed?
 import numpy as np
 from pydantic import BaseModel, Field
 from typing import List, Any
@@ -16,9 +16,9 @@ import re
 INDEX_DIR = "data/processed/bm25_index"
 CHUNKS_DIR = "data/processed/chunks"
 os.environ["HF_HOME"] = "/sgoinfre/gasoares/.cache/huggingface"
-os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN")
+hf_token = os.getenv("HF_TOKEN")
 
-# ── Pydantic models ────────────────────────────────────────────────────────────
+# ── Pydantic models ──────────────────────────────────────────────────────────
 
 
 class MinimalSource(BaseModel):
@@ -60,7 +60,7 @@ class StudentSearchResultsAndAnswer(StudentSearchResults):
     search_results: List[MinimalAnswer]
 
 
-# ── Loading ────────────────────────────────────────────────────────────────────
+# ── Loading ──────────────────────────────────────────────────────────────────
 
 def load_documents(folder_path: str) -> List[Document]:
     documents: List[Document] = []
@@ -73,11 +73,8 @@ def load_documents(folder_path: str) -> List[Document]:
         for filename in filenames:
             if filename.endswith(('.png', '.jpg', '.ico', '.pyc')):
                 continue
-
             file_path = os.path.join(root, filename)
-
-            print(file_path)
-
+            # print(file_path)
             content = parse_file(file_path)
 
             documents.append(
@@ -88,43 +85,11 @@ def load_documents(folder_path: str) -> List[Document]:
                     }
                 )
             )
-
     print(f"Loaded {len(documents)} documents")
     return documents
 
 
-    # if not os.path.exists(folder_path):
-    #     raise FileNotFoundError(f"Folder not found: {folder_path}")
-
-    # documents = []
-    # skipped = []
-
-    # for root, dirs, files in os.walk(folder_path):
-    #     for filename in files:
-    #         if not (filename.endswith(".py") or filename.endswith(".md")):
-    #             continue
-    #         file_path = os.path.join(root, filename)
-    #         try:
-    #             with open(file_path, "r", encoding="utf-8") as f:
-    #                 content = f.read()
-    #         except UnicodeDecodeError:
-    #             try:
-    #                 with open(file_path, "r", encoding="latin-1") as f:
-    #                     content = f.read()
-    #             except Exception as e:
-    #                 skipped.append((file_path, str(e)))
-    #                 continue
-
-    #         documents.append(Document(
-    #             page_content=f"{content}",
-    #             metadata={"file_path": file_path}
-    #         ))
-
-    # print(f"Loaded {len(documents)} files, skipped {len(skipped)}")
-    # return documents
-
-
-# ── Chunking ───────────────────────────────────────────────────────────────────
+# ── Chunking ─────────────────────────────────────────────────────────────────
 
 def split_documents(documents: List[Document], chunk_size: int = 2000) -> List[Document]:
     py_splitter = RecursiveCharacterTextSplitter.from_language(
@@ -146,65 +111,13 @@ def split_documents(documents: List[Document], chunk_size: int = 2000) -> List[D
             split = py_splitter.split_documents([doc])
         else:
             split = md_splitter.split_documents([doc])
-        # res, pos = {}, 0
-        # for i, chunk in enumerate(splitter):
-        #     # start = doc.metadata['first_character_index']  # splitter.find(chunk, pos)
-        #     start = chunk.metadata.get("start_index", 0)
-        #     if start == -1:
-        #         continue
-
-        #     end = start + len(chunk.page_content)
-        #     pos = end
-        #     chunk_id = f"{doc.metadata['file_path']}:{start}:{end}:{i}"
-
-        #     res[chunk_id] = {
-        #         "text": chunk,
-        #         "file_path": MinimalSource(
-        #             file_path=doc.metadata['file_path'],
-        #             first_character_index=start,
-        #             last_character_index=end
-        #         )
-        #     }
         for chunk in split:
             start = chunk.metadata.get("start_index", 0)
             chunk.metadata["first_character_index"] = start
             chunk.metadata["last_character_index"] = start + len(chunk.page_content)
-            # chunk.page_content = f"# file: {chunk.metadata['file_path']}\n{chunk.page_content}"
         chunks.extend(split)
-    print("====================================")
-    print(chunks[0])
-    print("====================================")
     print(f"Split into {len(chunks)} chunks")
     return chunks
-
-
-# corpus support
-
-
-def clean_text(text: str) -> str:
-    # lowercase
-    text = text.lower()
-
-    # remove markdown tables
-    text = re.sub(r'^\|.*\|$', ' ', text, flags=re.MULTILINE)
-
-    # remove markdown formatting
-    text = re.sub(r'[`*_>#-]', ' ', text)
-
-    # remove issue/pr references
-    text = re.sub(r'gh-(issue|pr):\d+', ' ', text)
-
-    # remove html tags
-    text = re.sub(r'<[^>]+>', ' ', text)
-
-    # split snake_case
-    text = re.sub(r"_", " ", text)
-
-    # collapse whitespace
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
-
-    return text.strip()
 
 
 def normalize_text(text: str) -> str:
@@ -213,13 +126,11 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-# ── BM25 index ─────────────────────────────────────────────────────────────────
+# ── BM25 index ───────────────────────────────────────────────────────────────
 
 def build_index(chunks: List[Document]) -> bm25s.BM25:
     corpus = [chunk.page_content for chunk in chunks]
-    # corpus = [v["text"] for v in chunks_data.values()]
-    # corpus = [clean_text(chunk.page_content) for chunk in chunks]
-    tokenized = bm25s.tokenize(corpus)  # , stopwords=None, stemmer=None
+    tokenized = bm25s.tokenize(corpus)
     retriever = bm25s.BM25()
     retriever.index(tokenized)
     return retriever
@@ -258,23 +169,7 @@ def load_chunks_json(path=os.path.join(CHUNKS_DIR, "chunks.json")):
         )
         for item in data
     ]
-# def save_index(retriever: bm25s.BM25, chunks: List[Document]) -> None:
-#     os.makedirs(INDEX_DIR, exist_ok=True)
-#     os.makedirs(CHUNKS_DIR, exist_ok=True)
-#     retriever.save(INDEX_DIR)
-#     # json.dump(chunks, f, indent=2)
-#     with open(os.path.join(CHUNKS_DIR, "chunks.json"), "wb") as f:
-#         # pickle.dump(chunks, f)
-#         json.dump(chunks, f, indent=2)
-#     print(f"Index saved to {INDEX_DIR}")
 
-
-# def load_index() -> tuple[bm25s.BM25, List[Document]]:
-#     retriever = bm25s.BM25.load(INDEX_DIR, load_corpus=False)
-#     with open(os.path.join(CHUNKS_DIR, "chunks.json"), "rb") as f:
-#         chunks = json.load(f)
-#     print("Index loaded")
-#     return retriever, chunks
 
 def get_or_build_index(chunks):
     chunks_path = os.path.join(CHUNKS_DIR, "chunks.json")
@@ -295,17 +190,9 @@ def get_or_build_index(chunks):
     save_chunks_json(chunks)
 
     return retriever, chunks
-# def get_or_build_index(chunks: List[Document]) -> tuple[bm25s.BM25, List[Document]]:
-#     if os.path.exists(INDEX_DIR) and os.listdir(INDEX_DIR):
-#         print("Loading existing index...")
-#         return load_chunks_json()
-#     print("Building new index...")
-#     retriever = build_index(chunks)
-#     save_chunks_json(chunks, INDEX_DIR)
-#     return retriever, chunks
 
 
-# ── Retrieval ──────────────────────────────────────────────────────────────────
+# ── Retrieval ────────────────────────────────────────────────────────────────
 
 def doc_to_minimal_source(doc: Document) -> MinimalSource:
     return MinimalSource(
@@ -315,75 +202,69 @@ def doc_to_minimal_source(doc: Document) -> MinimalSource:
     )
 
 
-def overlap_score(
-    question: str,
-    content: str
-) -> float:
-    q_words = set(
-        normalize_text(question).split()
-    )
-    c_words = set(
-        normalize_text(content[:500]).split()
-    )
-    if not q_words:
-        return 0.0
-    overlap = len(q_words & c_words)
-    # normalize by query size
-    return overlap / len(q_words)
-
-
-def retrieval(query: str, retriever: bm25s.BM25, chunks: List[Document], k: int = 15) -> List[MinimalSource]:
+def retrieval(query: str, retriever: bm25s.BM25, chunks: List[Document], mode, k: int = 10) -> List[MinimalSource]:
     tokenized_query = bm25s.tokenize(normalize_text(query))
-    results, scores = retriever.retrieve(tokenized_query, k=k)
-
+    results, scores = retriever.retrieve(tokenized_query, k=k*3)
     relevant_chunks = [chunks[i] for i in results[0]]
-    # candidates = [
-    #     self.indexer.metadata[i]
-    #     for i in res[0]
-    # ]
-
-    ranked = sorted(
-        relevant_chunks,
-        key=lambda x: overlap_score(
-            query,
-            x.page_content
-        ),
-        reverse=True
-    )
-    # print(ranked[:k])
-    return ranked[:k]
-
-    print(f"Query: {query}")
+    if mode == "code":
+        filtered = [item for item in relevant_chunks if item.metadata["file_path"].endswith(".py")]
+    elif mode == "docs":
+        filtered = [item for item in relevant_chunks if not item.metadata["file_path"].endswith(".py")]
+    # print([item for item in chunks if item.metadata["file_path"].endswith(".py")])
+    filtered = filtered[:k]
+    print(f"\nQuery: {query}")
     print("=== CONTEXT ===")
-    for i, chunk in enumerate(relevant_chunks, 1):
+    for i, chunk in enumerate(filtered, 1):
         print(f"Document {i}: {chunk.metadata['file_path']} "
               f"[{chunk.metadata['first_character_index']}:{chunk.metadata['last_character_index']}]")
 
-    return [doc_to_minimal_source(chunk) for chunk in relevant_chunks]
+    return [doc_to_minimal_source(chunk) for chunk in filtered]
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── UnasweredQuestions ───────────────────────────────────────────────────────
+
+def unQuestHelper(item) -> UnansweredQuestion:
+    return UnansweredQuestion(
+        question_id=item["question_id"],
+        question=item["question"]
+    )
+
+
+def unQuestOpen(path: str) -> List[UnansweredQuestion]:
+    unQuestions = open(path, 'r')
+    values = json.load(unQuestions)
+    unQuestions.close()
+    return [unQuestHelper(item) for item in values["rag_questions"]]
+
+
+def unQuestPipeline(path: str):
+    unQuest = unQuestOpen(path)
+    results: list[List[MinimalSource]] = []  # this is useless, its much smarter to hop from unQuest to anQuest
+    if path.find("code"):
+        mode = "code"
+    else:
+        mode = "docs"
+    for item in unQuest:
+        results.append(retrieval(
+            item.question,
+            retriever, chunks, mode, k=10
+        ))
+    return results
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     docs = load_documents("data/raw/vllm-0.10.1")
     chunks = split_documents(docs)
     retriever, chunks = get_or_build_index(chunks)
-    results = retrieval(
-        "What are the default values for FP8_MIN and FP8_MAX constants in vLLM's triton_flash_attention module?",
-        retriever, chunks, k=15
-    )
+    # results = retrieval(
+    #     "What activation formats does the fused batched MoE layer return in vLLM?",
+    #     retriever, chunks, "code", k=10
+    # )
+    results = unQuestPipeline('datasets_public/public/UnansweredQuestions/dataset_code_public.json')
     print(results)
-    print(bm25s.tokenize(normalize_text(
-        "What are the default values for FP8_MIN and FP8_MAX constants in vLLM's triton_flash_attention module?"
-    )))
-    # sample = chunks[123].page_content
-    # print(sample)
-    # print(bm25s.tokenize([sample]))
-
-    # target_chunks = [c for c in chunks if "triton_flash_attention" in c.metadata["file_path"] 
-    #                  and "ops" in c.metadata["file_path"]]
-    # for c in target_chunks:
-    #     if "FP8_MIN" in c.page_content or "FP8_MAX" in c.page_content:
-    #         print(c.metadata)
-    #         print(c.page_content[:300])
-    #         print("---")
+        # print(item.question)
+    # print(bm25s.tokenize(normalize_text(
+    #     "What activation formats does the fused batched MoE layer return in vLLM?"
+    # )))
