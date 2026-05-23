@@ -9,12 +9,14 @@ from typing import List, Any
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 import re
+from llama_cpp import Llama
 
 # source venv/bin/activate
-# pip install bm25s langchain_text_splitters langchain_core
+# pip install bm25s langchain_text_splitters langchain_core llama-cpp-python
 
 INDEX_DIR = "data/processed/bm25_index"
 CHUNKS_DIR = "data/processed/chunks"
+MODEL_PATH = "qwen3-0.6b-q4_k_m.gguf"
 os.environ["HF_HOME"] = "/sgoinfre/gasoares/.cache/huggingface"
 hf_token = os.getenv("HF_TOKEN")
 
@@ -202,23 +204,27 @@ def doc_to_minimal_source(doc: Document) -> MinimalSource:
     )
 
 
-def retrieval(query: str, retriever: bm25s.BM25, chunks: List[Document], mode, k: int = 10) -> List[MinimalSource]:
+def retrieval(query: str, retriever: bm25s.BM25, chunks: List[Document], mode, k: int = 5):  # -> List[MinimalSource]:
     tokenized_query = bm25s.tokenize(normalize_text(query))
-    results, scores = retriever.retrieve(tokenized_query, k=k*3)
+    fetch_k = max(k * 2, k + 3)
+    results, scores = retriever.retrieve(tokenized_query, k=fetch_k)
     relevant_chunks = [chunks[i] for i in results[0]]
     if mode == "code":
         filtered = [item for item in relevant_chunks if item.metadata["file_path"].endswith(".py")]
     elif mode == "docs":
         filtered = [item for item in relevant_chunks if not item.metadata["file_path"].endswith(".py")]
-    # print([item for item in chunks if item.metadata["file_path"].endswith(".py")])
     filtered = filtered[:k]
     print(f"\nQuery: {query}")
     print("=== CONTEXT ===")
     for i, chunk in enumerate(filtered, 1):
         print(f"Document {i}: {chunk.metadata['file_path']} "
               f"[{chunk.metadata['first_character_index']}:{chunk.metadata['last_character_index']}]")
-
-    return [doc_to_minimal_source(chunk) for chunk in filtered]
+    sources = [doc_to_minimal_source(chunk) for chunk in filtered]
+    context_text = "\n\n".join(
+        f"[{chunk.metadata['file_path']}]\n{chunk.page_content}"
+        for chunk in filtered
+    )
+    return sources, context_text  # [doc_to_minimal_source(chunk) for chunk in filtered]
 
 
 # ── UnasweredQuestions ───────────────────────────────────────────────────────
@@ -237,24 +243,94 @@ def unQuestOpen(path: str) -> List[UnansweredQuestion]:
     return [unQuestHelper(item) for item in values["rag_questions"]]
 
 
-def unQuestPipeline(path: str):
+def unQuestPipeline(path: str, llm: Llama):
+    answers: list[MinimalAnswer] = []
     unQuest = unQuestOpen(path)
-    results: list[List[MinimalSource]] = []  # this is useless, its much smarter to hop from unQuest to anQuest
-    if path.find("code"):
+    if "code" in path:
         mode = "code"
     else:
         mode = "docs"
     for item in unQuest:
-        results.append(retrieval(
+        related_sources, context_text = retrieval(
             item.question,
-            retriever, chunks, mode, k=10
-        ))
-    return results
+            retriever, chunks, mode, k=2
+        )
+        prompt = f"""<|im_start|>system
+Answer in 1-2 sentences using only the context.<|im_end|>
+<|im_start|>user
+{context_text}
+
+Q: {item.question}<|im_end|>
+<|im_start|>assistant
+"""
+        output = llm(
+            prompt,
+            max_tokens=60,
+            temperature=0.0,
+            echo=False,
+            stop=["<|im_end|>", "\n\n"],
+        )
+        answer: str = output["choices"][0]["text"].strip()
+        answers.append(
+            MinimalAnswer(
+                question_id=item.question_id,
+                question=item.question,
+                retrieved_sources=related_sources,  # ← the List[MinimalSource]
+                answer=answer
+            )
+        )
+#     answers: list[MinimalAnswer] = []
+#     unQuest = unQuestOpen(path)
+#     if "code" in path:
+#         mode = "code"
+#     else:
+#         mode = "docs"
+#     for item in unQuest:
+#         related_chunks = retrieval(
+#             item.question,
+#             retriever, chunks, mode, k=2
+#         )
+#         prompt = f"""<|im_start|>system
+# Answer using ONLY the provided context in one or two sentences.
+# Respond with plain text only.<|im_end|>
+# <|im_start|>user /no_think
+# Context:
+# {related_chunks}
+# Question:
+# {item.question}<|im_end|>
+# <|im_start|>assistant
+# """
+#         output = llm(
+#             prompt,
+#             max_tokens=60,
+#             temperature=0.0,
+#             echo=False,
+#             stop=["<|im_end|>", "\n\n"]
+#         )
+#         answer: str = output["choices"][0]["text"].strip()
+#         answers.append(
+#             MinimalAnswer(
+#                 question_id=item.question_id,
+#                 question=item.question,
+#                 retrieved_sources=related_chunks,
+#                 answer=answer
+#             )
+#         )
+    return answers
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    llm = Llama(
+        model_path=MODEL_PATH,
+        n_ctx=2048,
+        n_threads=os.cpu_count() or 8,
+        n_gpu_layers=0,
+        verbose=False,
+        n_batch=2048,
+        last_n_tokens_size=0
+    )
     docs = load_documents("data/raw/vllm-0.10.1")
     chunks = split_documents(docs)
     retriever, chunks = get_or_build_index(chunks)
@@ -262,7 +338,7 @@ if __name__ == "__main__":
     #     "What activation formats does the fused batched MoE layer return in vLLM?",
     #     retriever, chunks, "code", k=10
     # )
-    results = unQuestPipeline('datasets_public/public/UnansweredQuestions/dataset_code_public.json')
+    results = unQuestPipeline('datasets_public/public/UnansweredQuestions/dataset_code_public.json', llm)
     print(results)
         # print(item.question)
     # print(bm25s.tokenize(normalize_text(
