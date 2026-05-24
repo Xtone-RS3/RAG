@@ -243,7 +243,7 @@ def unQuestOpen(path: str) -> List[UnansweredQuestion]:
     return [unQuestHelper(item) for item in values["rag_questions"]]
 
 
-def unQuestPipeline(path: str, llm: Llama):
+def unQuestPipeline(path: str, llm: Llama) -> list[MinimalAnswer]:
     answers: list[MinimalAnswer] = []
     unQuest = unQuestOpen(path)
     if "code" in path:
@@ -253,30 +253,56 @@ def unQuestPipeline(path: str, llm: Llama):
     for item in unQuest:
         related_sources, context_text = retrieval(
             item.question,
-            retriever, chunks, mode, k=2
+            retriever, chunks, mode, k=1
         )
-        prompt = f"""<|im_start|>system
-Answer in 1-2 sentences using only the context.<|im_end|>
-<|im_start|>user
-{context_text}
-
-Q: {item.question}<|im_end|>
-<|im_start|>assistant
+#         prompt = f"""<|im_start|>system
+# Answer using ONLY the provided context in one or two sentences.
+# Respond with plain text only.<|im_end|>
+# <|im_start|>user
+# Context:
+# {context_text}
+# Question:
+# {item.question}<|im_end|>
+# <|im_start|>assistant
+# """
+        prompt = f"""
+/No_think 
+Instructions: Answer using ONLY the context. 
+Be direct. No preamble. 
+No markdown. No URLs. 
+If it is a list use commas. 
+If not in context: 'Not found in context'.\n\n
+Context: The three key abstractions used for disaggregated prefilling 
+in vLLM are: KV pipe, KV lookup buffer, and KV connector.\n
+Question: What are the three key abstractions used for disaggregated 
+prefilling in vLLM?\n
+Answer: KV pipe, KV lookup buffer, and KV connector\n\n
+Context: {context_text}\n
+Question: {item.question}\n
+Answer:
 """
         output = llm(
             prompt,
-            max_tokens=60,
+            max_tokens=200,
             temperature=0.0,
             echo=False,
-            stop=["<|im_end|>", "\n\n"],
+            # stop=["<|im_end|>", "\n\n"],
+            stop=["Question:", "Context:", "Instructions:", "\n\n"],
         )
         answer: str = output["choices"][0]["text"].strip()
+        
+        print("========================================================================================================================")
+        print(prompt)
+        print("########################################################################################################################")
+        print(output)
+        print("########################################################################################################################")
+        print("========================================================================================================================")
         answers.append(
             MinimalAnswer(
                 question_id=item.question_id,
                 question=item.question,
-                retrieved_sources=related_sources,  # ← the List[MinimalSource]
-                answer=answer
+                answer=answer,
+                retrieved_sources=related_sources  # ← the List[MinimalSource]
             )
         )
 #     answers: list[MinimalAnswer] = []
@@ -316,7 +342,17 @@ Q: {item.question}<|im_end|>
 #                 answer=answer
 #             )
 #         )
-    return answers
+    return answers, mode
+
+
+def save_answers(answers: list[MinimalAnswer], mode):
+    os.makedirs("data/output/search_results", exist_ok=True)
+    data = [
+        {"source": answer.model_dump()}
+        for answer in answers
+    ]
+    with open(f"data/output/search_results/dataset_{mode}_public.json", "w", encoding="utf-8") as fd:
+        json.dump(data, fd, indent=4, ensure_ascii=False)
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -327,9 +363,11 @@ if __name__ == "__main__":
         n_ctx=2048,
         n_threads=os.cpu_count() or 8,
         n_gpu_layers=0,
+        use_mlock=True,
         verbose=False,
-        n_batch=2048,
-        last_n_tokens_size=0
+        n_batch=512,
+        last_n_tokens_size=0,
+        cache_prompt=True
     )
     docs = load_documents("data/raw/vllm-0.10.1")
     chunks = split_documents(docs)
@@ -338,8 +376,9 @@ if __name__ == "__main__":
     #     "What activation formats does the fused batched MoE layer return in vLLM?",
     #     retriever, chunks, "code", k=10
     # )
-    results = unQuestPipeline('datasets_public/public/UnansweredQuestions/dataset_code_public.json', llm)
-    print(results)
+    answers, mode = unQuestPipeline('datasets_public/public/UnansweredQuestions/dataset_docs_public.json', llm)
+    save_answers(answers, mode)
+    # print(answers)
         # print(item.question)
     # print(bm25s.tokenize(normalize_text(
     #     "What activation formats does the fused batched MoE layer return in vLLM?"
