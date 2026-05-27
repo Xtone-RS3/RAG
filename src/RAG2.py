@@ -107,12 +107,12 @@ def split_documents(documents: List[Document], chunk_size: int = 2000) -> List[D
         chunk_overlap=200,
         add_start_index=True
     )
-    md_splitter = RecursiveCharacterTextSplitter.from_language(
+    md_splitter = RecursiveCharacterTextSplitter(
         language=Language.MARKDOWN,  # if you never run into issues, this is right, if you do, look at this
         chunk_size=chunk_size,
         chunk_overlap=200,
         add_start_index=True,
-        # separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]  # needed?
+        separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]  # needed?
     )
 
     chunks = []

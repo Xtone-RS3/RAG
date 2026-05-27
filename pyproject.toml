@@ -1,0 +1,14 @@
+[project]
+name = "RAG"
+version = "0.0.1"
+description = "Retrieval Augmented Generation"
+requires-python = ">=3.10"
+dependencies = [
+	"langchain-text-splitters",
+	"langchain-core",
+	"bm25s",
+	"transformers",
+	"torch",
+	"llama-cpp-python",
+	"fire",
+]
