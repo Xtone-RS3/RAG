@@ -10,6 +10,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 import re
 from llama_cpp import Llama
+import fire
 
 # source venv/bin/activate
 # ./moulinette/moulinette_pkg/moulinette-ubuntu evaluate_student_search_results --student_answer_path data/output/search_results/dataset_code_public.json --dataset_path datasets_public/public/AnsweredQuestions/dataset_code_public.json
@@ -83,7 +84,6 @@ def load_documents(folder_path: str) -> List[Document]:
             if filename.endswith(('.png', '.jpg', '.ico', '.pyc')):
                 continue
             file_path = os.path.join(root, filename)
-            # print(file_path)
             content = parse_file(file_path)
 
             documents.append(
@@ -108,11 +108,10 @@ def split_documents(documents: List[Document], chunk_size: int = 2000) -> List[D
         add_start_index=True
     )
     md_splitter = RecursiveCharacterTextSplitter.from_language(
-        language=Language.MARKDOWN,  # if you never run into issues, this is right, if you do, look at this
+        language=Language.MARKDOWN,
         chunk_size=chunk_size,
         chunk_overlap=200,
         add_start_index=True,
-        # separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]  # needed?
     )
 
     chunks = []
@@ -263,16 +262,6 @@ def unQuestPipeline(path: str, llm: Llama, k=10) -> list[MinimalAnswer]:
             item.question,
             retriever, chunks, mode, k=k
         )
-#         prompt = f"""<|im_start|>system
-# Answer using ONLY the provided context in one or two sentences.
-# Respond with plain text only.<|im_end|>
-# <|im_start|>user
-# Context:
-# {context_text}
-# Question:
-# {item.question}<|im_end|>
-# <|im_start|>assistant
-# """
         prompt = f"""
 /No_think
 Instructions: Answer using ONLY the context.
@@ -311,43 +300,6 @@ Answer:
                 retrieved_sources=related_sources  # ← the List[MinimalSource]
             )
         )
-#     answers: list[MinimalAnswer] = []
-#     unQuest = unQuestOpen(path)
-#     if "code" in path:
-#         mode = "code"
-#     else:
-#         mode = "docs"
-#     for item in unQuest:
-#         related_chunks = retrieval(
-#             item.question,
-#             retriever, chunks, mode, k=2
-#         )
-#         prompt = f"""<|im_start|>system
-# Answer using ONLY the provided context in one or two sentences.
-# Respond with plain text only.<|im_end|>
-# <|im_start|>user /no_think
-# Context:
-# {related_chunks}
-# Question:
-# {item.question}<|im_end|>
-# <|im_start|>assistant
-# """
-#         output = llm(
-#             prompt,
-#             max_tokens=60,
-#             temperature=0.0,
-#             echo=False,
-#             stop=["<|im_end|>", "\n\n"]
-#         )
-#         answer: str = output["choices"][0]["text"].strip()
-#         answers.append(
-#             MinimalAnswer(
-#                 question_id=item.question_id,
-#                 question=item.question,
-#                 retrieved_sources=related_chunks,
-#                 answer=answer
-#             )
-#         )
     return answers, mode
 
 
@@ -363,24 +315,47 @@ def save_answers(answers, mode, withAnswers: bool, k=10):  # list[MinimalAnswer]
             search_results=answers,
             k=k
         )
-    # data = [
-    #     {"source": answer.model_dump()}
-    #     for answer in answers
-    # ]
     with open(f"data/output/search_results/dataset_{mode}_private.json", "w", encoding="utf-8") as fd:
         json.dump(output.model_dump(exclude={"search_results": {"__all__": {"content"}}}), fd, indent=4, ensure_ascii=False)
 
 
-# def save_answers(answers: StudentSearchResultsAndAnswer, mode):  # list[MinimalAnswer]
-#     os.makedirs("data/output/search_results", exist_ok=True)
-#     data = [
-#         {"source": answer.model_dump()}
-#         for answer in answers
-#     ]
-#     with open(f"data/output/search_results/dataset_{mode}_private.json", "w", encoding="utf-8") as fd:
-#         json.dump(data, fd, indent=4, ensure_ascii=False)
-
 # ── Main ─────────────────────────────────────────────────────────────────────
+
+
+class Main:
+    # def __init__(self):
+    #     self.retriever = 0  # this has gotta be retarded as fuck
+
+    def index(self, max_chunk_size: int = 2000):
+        if max_chunk_size <= 350:
+            print("Chunk size too small for the scope, defaulting to 2k")
+            max_chunk_size = 2000
+        docs = load_documents("data/raw/vllm-0.10.1")
+        chunks = split_documents(docs, max_chunk_size)
+        retriever, chunks = get_or_build_index(chunks)
+        # self.retriever = retriever
+
+    def search(self, question: str, retriever, chunks, mode, k=10):
+        related_sources, context_text = retrieval(
+            question,
+            retriever,
+            chunks,
+            mode,
+            k=k
+        )
+        return related_sources, context_text
+
+    def search_dataset(self, dataset_path: str = DATASET_PATH, k: int = K, save_directory: str = SAVE_DIRR):
+        pass
+
+    def answer(self, prompt: str = PROMPT, k: int = K):
+        # retrieval + llm
+        pass
+
+    def answer_dataset(self, student_search_results_path: str = STUDENT_SEARCH_RESULTS_PATH, save_directory: str = SAVE_DIRR_ANSWERS):
+        # your current unQuestPipeline()
+        pass
+
 
 if __name__ == "__main__":
     llm = Llama(
